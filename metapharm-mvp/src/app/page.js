@@ -48,12 +48,12 @@ export default function LandingPage() {
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
           <Link href="/search" className="w-full">
             <Button size="lg" className="w-full bg-green-700 hover:bg-green-800 h-14 text-lg rounded-xl shadow-lg shadow-green-200">
-              <Search className="mr-2 h-5 w-5" /> Lancer la recherche
+              <Search className="mr-2" /> Rechercher un produit
             </Button>
           </Link>
-          <Link href="/auth/register" className="w-full">
+          <Link href="/pharmacies-de-garde" className="w-full">
             <Button size="lg" variant="outline" className="w-full h-14 text-lg rounded-xl border-green-200 text-green-800 hover:bg-green-50">
-              <Store className="mr-2 h-5 w-5" /> Je suis Pharmacien
+              <Store className="mr-2" /> Pharmacies de Garde
             </Button>
           </Link>
         </div>

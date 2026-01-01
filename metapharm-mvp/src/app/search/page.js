@@ -1,9 +1,14 @@
 'use client'
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { Search, MapPin, Navigation, ShoppingCart } from 'lucide-react'
+import { Search, MapPin, Navigation, ShoppingCart, Filter } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useCart } from '@/context/CartContext'
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { mockPharmacies, mockProducts, mockStocks } from '@/lib/mockData'
+import { calculateDistance } from '@/lib/utils'
+import { toast } from "sonner"
 
 const MapWithNoSSR = dynamic(() => import('@/components/patient/Map'), {
   ssr: false,
@@ -16,6 +21,7 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [userLocation, setUserLocation] = useState(null)
+  const [showOnlyOpen, setShowOnlyOpen] = useState(false)
 
   const fetchData = async (query = '') => {
     setLoading(true)
@@ -24,23 +30,49 @@ export default function SearchPage() {
 
       if (query === '') {
         const { data, error } = await supabase.from('pharmacies').select('*')
-        console.log('🔍 Pharmacies récupérées:', data)
-        console.log('❌ Erreur Supabase:', error)
-        dataToDisplay = data
+        
+        if (!data || data.length === 0 || error) {
+           console.log("⚠️ Utilisation des données mockées (Pharmacies)")
+           dataToDisplay = mockPharmacies
+        } else {
+           dataToDisplay = data
+        }
       } else {
         const { data: products } = await supabase
           .from('products')
           .select('id, name')
           .ilike('name', `%${query}%`)
 
-        if (products.length > 0) {
-          const productIds = products.map(p => p.id)
+        // --- LOGIQUE DE RECHERCHE AVEC FALLBACK MOCK ---
+        let foundProducts = products
+        
+        // Si Supabase ne renvoie rien ou plante, on cherche dans le mock
+        if (!foundProducts || foundProducts.length === 0) {
+           console.log("⚠️ Recherche mockée pour:", query)
+           foundProducts = mockProducts.filter(p => 
+             p.name.toLowerCase().includes(query.toLowerCase())
+           )
+        }
+
+        if (foundProducts && foundProducts.length > 0) {
+          const productIds = foundProducts.map(p => p.id)
           
-          const { data: stocks } = await supabase
+          let stocks = []
+          const { data: dbStocks } = await supabase
             .from('stocks')
             .select('pharmacy_id, price, product_id, pharmacies(*)')
             .in('product_id', productIds)
             .eq('available', true)
+            
+          if (!dbStocks || dbStocks.length === 0) {
+             // Fallback Mock Stocks
+             stocks = mockStocks.filter(s => productIds.includes(s.product_id)).map(s => {
+                const pharma = mockPharmacies.find(p => p.id === s.pharmacy_id)
+                return { ...s, pharmacies: pharma }
+             })
+          } else {
+             stocks = dbStocks
+          }
 
           dataToDisplay = stocks.map(item => ({
             ...item.pharmacies,
@@ -54,26 +86,45 @@ export default function SearchPage() {
       setPharmacies(dataToDisplay || [])
     } catch (error) {
       console.error('💥 Erreur:', error)
+      // En cas de crash total, on affiche au moins les pharmacies mockées
+      setPharmacies(mockPharmacies)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { 
+    fetchData() 
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          })
+        },
+        (error) => console.log("Géolocalisation auto refusée ou échouée:", error)
+      )
+    }
+  }, [])
 
   const handleLocateMe = () => {
     if (!navigator.geolocation) {
-      alert("La géolocalisation n'est pas supportée par votre navigateur")
+      toast.error("La géolocalisation n'est pas supportée par votre navigateur")
       return
     }
+    
+    toast.info("Localisation en cours...")
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setUserLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude
         })
+        toast.success("Position trouvée !")
       },
-      () => alert("Impossible de vous localiser. Vérifiez vos permissions GPS.")
+      () => toast.error("Impossible de vous localiser. Vérifiez vos permissions GPS.")
     )
   }
 
@@ -83,31 +134,49 @@ export default function SearchPage() {
     }
   }
 
+  const filteredPharmacies = showOnlyOpen 
+    ? pharmacies.filter(p => p.is_on_duty) 
+    : pharmacies
+
   return (
     <main className="flex min-h-screen flex-col bg-gray-50">
       {/* HEADER */}
       <div className="bg-white p-4 shadow-sm z-10 sticky top-0">
         <h1 className="text-xl font-bold text-green-700 mb-3">🏥 MetaPharm</h1>
         
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <input 
-              type="text" 
-              placeholder="Chercher: Doliprane, Coartem..." 
-              className="w-full p-3 pl-10 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={handleSearch}
-            />
-            <Search className="absolute left-3 top-3.5 text-gray-400" size={18} />
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input 
+                type="text" 
+                placeholder="Chercher: Doliprane, Coartem..." 
+                className="w-full p-3 pl-10 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={handleSearch}
+              />
+              <Search className="absolute left-3 top-3.5 text-gray-400" size={18} />
+            </div>
+            
+            <button 
+              onClick={handleLocateMe}
+              className="bg-green-100 p-3 rounded-xl text-green-700 hover:bg-green-200 transition-colors"
+            >
+              <Navigation size={24} />
+            </button>
           </div>
-          
-          <button 
-            onClick={handleLocateMe}
-            className="bg-green-100 p-3 rounded-xl text-green-700 hover:bg-green-200 transition-colors"
-          >
-            <Navigation size={24} />
-          </button>
+
+          {/* Filtres */}
+          <div className="flex items-center space-x-2 px-1">
+            <Switch 
+              id="open-filter" 
+              checked={showOnlyOpen}
+              onCheckedChange={setShowOnlyOpen}
+            />
+            <Label htmlFor="open-filter" className="text-sm text-gray-600 cursor-pointer">
+              Afficher uniquement les pharmacies de garde (Ouvertes)
+            </Label>
+          </div>
         </div>
       </div>
 
@@ -126,7 +195,7 @@ export default function SearchPage() {
 
       {/* CARTE */}
       <div className="flex-1 relative z-0">
-        <MapWithNoSSR pharmacies={pharmacies} userLocation={userLocation} />
+        <MapWithNoSSR pharmacies={filteredPharmacies} userLocation={userLocation} />
       </div>
 
       {/* RÉSULTATS */}
@@ -135,13 +204,14 @@ export default function SearchPage() {
         <div className="px-4">
           <h2 className="font-semibold text-gray-800 mb-4">
             {searchTerm ? `Résultats pour "${searchTerm}"` : "Pharmacies autour de vous"}
+            {showOnlyOpen && <span className="text-green-600 text-sm font-normal ml-2">(Ouvertes uniquement)</span>}
           </h2>
 
           {loading ? <p className="text-center text-gray-400">Recherche en cours...</p> : (
             <div className="space-y-3">
-              {pharmacies.length === 0 && <p className="text-gray-500">Aucune pharmacie trouvée pour ce médicament.</p>}
+              {filteredPharmacies.length === 0 && <p className="text-gray-500">Aucune pharmacie trouvée pour ce médicament.</p>}
               
-              {pharmacies.map((pharma, index) => (
+              {filteredPharmacies.map((pharma, index) => (
                 <div key={index} className="p-4 border border-gray-100 rounded-2xl bg-white shadow-sm">
                   <div className="flex justify-between">
                     <div>
@@ -149,6 +219,11 @@ export default function SearchPage() {
                       <p className="text-sm text-gray-500 flex items-center gap-1">
                         <MapPin size={14} /> {pharma.quartier}
                       </p>
+                      {userLocation && (
+                        <p className="text-xs text-blue-600 mt-1 font-medium">
+                          📍 {calculateDistance(userLocation.lat, userLocation.lng, pharma.lat, pharma.lng)} km
+                        </p>
+                      )}
                       {pharma.stock_info && (
                         <span className="text-green-700 font-bold text-sm bg-green-50 px-2 py-1 rounded mt-1 inline-block">
                           {pharma.stock_info}

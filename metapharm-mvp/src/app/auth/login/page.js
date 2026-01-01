@@ -109,6 +109,13 @@ export default function LoginPage() {
             <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800" disabled={loading}>
               {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connexion en cours</> : 'Se connecter'}
             </Button>
+
+            <div className="text-center text-sm text-gray-500 mt-4">
+              Pas encore de compte ?{' '}
+              <Link href="/auth/register" className="text-blue-600 hover:underline font-medium">
+                Créer un compte
+              </Link>
+            </div>
           </form>
 
           <div className="mt-6 text-center text-sm">
