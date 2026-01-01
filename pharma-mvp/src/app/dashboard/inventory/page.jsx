@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Search, Plus, RefreshCw, Loader2 } from 'lucide-react'
+import AddProductModal from '@/components/dashboard/AddProductModal'
 
 export default function InventoryPage() {
   const [stocks, setStocks] = useState([])
@@ -71,9 +72,7 @@ export default function InventoryPage() {
           <h2 className="text-3xl font-bold tracking-tight text-gray-900">Gestion du Stock</h2>
           <p className="text-gray-500">Gérez la disponibilité de vos médicaments en temps réel.</p>
         </div>
-        <Button className="bg-green-700 hover:bg-green-800">
-          <Plus className="mr-2 h-4 w-4" /> Ajouter un produit
-        </Button>
+        <AddProductModal onProductAdded={fetchInventory} />
       </div>
 
       {/* --- BARRE D'OUTILS (Recherche + Filtres) --- */}

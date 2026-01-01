@@ -1,201 +1,214 @@
 'use client'
-import { useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { ShoppingCart, Plus, Trash2, CreditCard } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { Phone, MapPin, Clock, CheckCircle, Package } from 'lucide-react'
+import { toast } from 'sonner'
 
 export default function SalesPage() {
-  const [cart, setCart] = useState([])
-  const [searchProduct, setSearchProduct] = useState('')
-  const [quantity, setQuantity] = useState(1)
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+  // 1. Charger les commandes existantes
+  const fetchOrders = async () => {
+    try {
+      // TODO: Remplacer '1' par l'ID dynamique de la pharmacie connectée
+      const { data, error } = await supabase
+        .from('sales')
+        .select(`
+          *,
+          sale_items (
+            quantity,
+            unit_price,
+            products ( name )
+          )
+        `)
+        .eq('pharmacy_id', 1) 
+        .order('created_at', { ascending: false })
 
-  const handleAddToCart = () => {
-    // Simulation - À connecter avec Supabase
-    if (searchProduct.trim()) {
-      const newItem = {
-        id: Date.now(),
-        name: searchProduct,
-        price: 5.50,
-        quantity: quantity,
-      }
-      setCart([...cart, newItem])
-      setSearchProduct('')
-      setQuantity(1)
+      if (error) throw error
+      setOrders(data)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const handleRemoveItem = (id) => {
-    setCart(cart.filter(item => item.id !== id))
-  }
+  // 2. Écouter les nouvelles commandes en TEMPS RÉEL
+  useEffect(() => {
+    fetchOrders()
 
-  const handleCheckout = () => {
-    if (cart.length === 0) {
-      alert('Le panier est vide')
-      return
+    // On s'abonne aux changements sur la table 'sales'
+    const channel = supabase
+      .channel('realtime:sales')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sales' }, (payload) => {
+        // Si une nouvelle commande arrive pour ma pharmacie (ID 1)
+        if (payload.new.pharmacy_id === 1) {
+          toast.message("🔔 Nouvelle commande reçue !", {
+            description: "Un client vient de valider un panier."
+          })
+          fetchOrders() // On recharge la liste
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
     }
-    // Simulation de paiement
-    alert(`Vente enregistrée : ${total.toFixed(2)}€`)
-    setCart([])
+  }, [])
+
+  // 3. Action : Changer le statut
+  const updateStatus = async (orderId, newStatus) => {
+    // Optimistic UI update
+    setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o))
+
+    const { error } = await supabase
+      .from('sales')
+      .update({ status: newStatus })
+      .eq('id', orderId)
+
+    if (error) {
+      toast.error("Erreur lors de la mise à jour")
+      fetchOrders() // Revert en cas d'erreur
+    } else {
+      toast.success(`Commande passée en : ${getStatusLabel(newStatus)}`)
+    }
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Caisse / Ventes</h1>
-        <p className="text-gray-500 mt-1">
-          Enregistrez les ventes de votre pharmacie
-        </p>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Formulaire d'ajout */}
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShoppingCart className="h-5 w-5" />
-                Nouvelle vente
-              </CardTitle>
-              <CardDescription>
-                Scannez ou recherchez un produit
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="md:col-span-2 space-y-2">
-                  <Label htmlFor="product">Produit</Label>
-                  <Input
-                    id="product"
-                    placeholder="Rechercher un produit..."
-                    value={searchProduct}
-                    onChange={(e) => setSearchProduct(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddToCart()}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Quantité</Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min="1"
-                    value={quantity}
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                  />
-                </div>
-              </div>
-              <Button onClick={handleAddToCart} className="w-full gap-2">
-                <Plus className="h-4 w-4" />
-                Ajouter au panier
-              </Button>
-
-              {/* Panier */}
-              <div className="rounded-md border mt-6">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Produit</TableHead>
-                      <TableHead className="text-center">Qté</TableHead>
-                      <TableHead className="text-right">Prix</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {cart.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                          Le panier est vide
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      cart.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-medium">{item.name}</TableCell>
-                          <TableCell className="text-center">{item.quantity}</TableCell>
-                          <TableCell className="text-right">{item.price.toFixed(2)}€</TableCell>
-                          <TableCell className="text-right font-medium">
-                            {(item.price * item.quantity).toFixed(2)}€
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleRemoveItem(item.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-600" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Résumé et paiement */}
+      <div className="flex justify-between items-center">
         <div>
-          <Card className="sticky top-6">
-            <CardHeader>
-              <CardTitle>Résumé</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Articles</span>
-                  <span className="font-medium">{cart.length}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Sous-total</span>
-                  <span className="font-medium">{total.toFixed(2)}€</span>
-                </div>
-                <div className="border-t pt-2 flex justify-between">
-                  <span className="font-semibold">Total</span>
-                  <span className="text-2xl font-bold text-emerald-600">
-                    {total.toFixed(2)}€
-                  </span>
-                </div>
-              </div>
-
-              <Button
-                onClick={handleCheckout}
-                className="w-full gap-2"
-                size="lg"
-                disabled={cart.length === 0}
-              >
-                <CreditCard className="h-5 w-5" />
-                Encaisser
-              </Button>
-
-              <div className="space-y-2 pt-4 border-t">
-                <p className="text-sm text-gray-600 font-medium">Méthodes de paiement</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" size="sm" className="text-xs">
-                    Carte
-                  </Button>
-                  <Button variant="outline" size="sm" className="text-xs">
-                    Espèces
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <h2 className="text-3xl font-bold tracking-tight text-gray-900">Commandes & Livraisons</h2>
+          <p className="text-gray-500">Suivez les commandes entrantes en temps réel.</p>
         </div>
+        <Badge variant="outline" className="px-3 py-1 border-green-200 bg-green-50 text-green-700">
+          🟢 Live Connexion active
+        </Badge>
       </div>
+
+      {loading ? (
+        <p>Chargement des commandes...</p>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-20 bg-white rounded-xl border border-dashed">
+          <Package className="mx-auto h-12 w-12 text-gray-300" />
+          <h3 className="mt-2 text-sm font-semibold text-gray-900">Aucune commande</h3>
+          <p className="mt-1 text-sm text-gray-500">Les commandes apparaîtront ici automatiquement.</p>
+        </div>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {orders.map((order) => (
+            <OrderCard key={order.id} order={order} onUpdateStatus={updateStatus} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
+
+// --- SOUS-COMPOSANT : La Carte de Commande ---
+function OrderCard({ order, onUpdateStatus }) {
+  const statusColors = {
+    pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    accepted: "bg-blue-100 text-blue-800 border-blue-200",
+    delivering: "bg-purple-100 text-purple-800 border-purple-200",
+    completed: "bg-green-100 text-green-800 border-green-200",
+    cancelled: "bg-red-100 text-red-800 border-red-200",
+  }
+
+  return (
+    <Card className="flex flex-col shadow-sm hover:shadow-md transition-shadow">
+      <CardHeader className="pb-3">
+        <div className="flex justify-between items-start">
+          <Badge className={`${statusColors[order.status] || "bg-gray-100"} hover:bg-opacity-80`}>
+            {getStatusLabel(order.status)}
+          </Badge>
+          <span className="text-xs text-gray-400 flex items-center gap-1">
+            <Clock size={12} />
+            {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+        <CardTitle className="text-lg mt-2">Commande #{order.id}</CardTitle>
+        <CardDescription className="flex flex-col gap-1 mt-1">
+          <span className="flex items-center gap-2 text-xs font-medium text-gray-700">
+            <Phone size={14} /> {order.customer_phone}
+          </span>
+          <span className="flex items-center gap-2 text-xs text-gray-500">
+            <MapPin size={14} /> {order.delivery_address}
+          </span>
+        </CardDescription>
+      </CardHeader>
+      
+      <Separator />
+      
+      <CardContent className="flex-1 py-4">
+        <div className="space-y-2">
+          {order.sale_items.map((item, idx) => (
+            <div key={idx} className="flex justify-between text-sm">
+              <span>{item.quantity}x {item.products?.name}</span>
+              <span className="font-medium">{item.unit_price * item.quantity} F</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-between font-bold text-lg pt-2 border-t border-dashed">
+          <span>Total</span>
+          <span className="text-green-700">{order.total_amount} FCFA</span>
+        </div>
+      </CardContent>
+
+      <CardFooter className="pt-0 flex gap-2">
+        {order.status === 'pending' && (
+          <>
+            <Button 
+              className="flex-1 bg-red-50 text-red-600 hover:bg-red-100 border-red-100" 
+              variant="outline"
+              onClick={() => onUpdateStatus(order.id, 'cancelled')}
+            >
+              Refuser
+            </Button>
+            <Button 
+              className="flex-1 bg-blue-600 hover:bg-blue-700" 
+              onClick={() => onUpdateStatus(order.id, 'accepted')}
+            >
+              Accepter
+            </Button>
+          </>
+        )}
+        
+        {order.status === 'accepted' && (
+          <Button 
+            className="w-full bg-purple-600 hover:bg-purple-700" 
+            onClick={() => onUpdateStatus(order.id, 'delivering')}
+          >
+            <Package className="mr-2 h-4 w-4" /> Remettre au Livreur
+          </Button>
+        )}
+
+        {order.status === 'delivering' && (
+          <Button 
+            className="w-full bg-green-600 hover:bg-green-700" 
+            onClick={() => onUpdateStatus(order.id, 'completed')}
+          >
+            <CheckCircle className="mr-2 h-4 w-4" /> Confirmer Livraison
+          </Button>
+        )}
+      </CardFooter>
+    </Card>
+  )
+}
+
+function getStatusLabel(status) {
+  switch (status) {
+    case 'pending': return '⏳ En attente'
+    case 'accepted': return '👨‍⚕️ Préparation'
+    case 'delivering': return '🛵 En Livraison'
+    case 'completed': return '✅ Livré'
+    case 'cancelled': return '❌ Annulé'
+    default: return status
+  }
+}
+
