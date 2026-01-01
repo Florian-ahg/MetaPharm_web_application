@@ -1,43 +1,77 @@
 'use client'
-import { useState } from 'react'
-import { createPharmacyAndUser } from '@/actions/admin' // On importe notre Server Action
+import { useState, useEffect } from 'react'
+import { createPharmacyAndUser } from '@/actions/admin'
+import { supabase } from '@/lib/supabase' // On importe Supabase pour lire la liste
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { ShieldCheck, Plus, Copy } from 'lucide-react'
+import { ShieldCheck, Plus, Store, MapPin, Loader2 } from 'lucide-react'
+import { toast } from 'sonner' // Optionnel si vous avez installé sonner, sinon utilisez alert()
 
 export default function AdminDashboard() {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
+  
+  // État pour stocker la liste des pharmacies
+  const [pharmaciesList, setPharmaciesList] = useState([])
+  const [loadingList, setLoadingList] = useState(true)
 
-  // Gestion du formulaire
+  // --- 1. FONCTION POUR CHARGER LA LISTE ---
+  const fetchPharmacies = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pharmacies')
+        .select('*')
+        .order('created_at', { ascending: false }) // Les plus récentes en haut
+
+      if (error) throw error
+      setPharmaciesList(data || [])
+    } catch (error) {
+      console.error("Erreur chargement liste:", error)
+    } finally {
+      setLoadingList(false)
+    }
+  }
+
+  // Charger la liste au démarrage de la page
+  useEffect(() => {
+    fetchPharmacies()
+  }, [])
+
+  // --- 2. GESTION DU FORMULAIRE (CRÉATION) ---
   async function handleSubmit(event) {
     event.preventDefault()
     setLoading(true)
     const formData = new FormData(event.target)
     
-    // Appel au serveur
+    // Appel au serveur (Server Action)
     const response = await createPharmacyAndUser(formData)
     
     setResult(response)
     setLoading(false)
-    if(response.success) event.target.reset() // Vider le formulaire si succès
+
+    if(response.success) {
+      event.target.reset() // Vider le formulaire
+      fetchPharmacies() // 🔄 RAFRAÎCHIR LA LISTE AUTOMATIQUEMENT
+    }
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
         
-        <div className="flex items-center gap-3 text-blue-900">
-          <ShieldCheck size={40} />
-          <h1 className="text-3xl font-bold">Espace Super-Admin</h1>
+        {/* En-tête */}
+        <div className="flex items-center gap-3 text-blue-900 border-b pb-4">
+          <ShieldCheck size={32} />
+          <h1 className="text-2xl md:text-3xl font-bold">Espace Super-Admin</h1>
         </div>
 
         <div className="grid md:grid-cols-2 gap-8">
+          
           {/* --- COLONNE GAUCHE : Formulaire de création --- */}
-          <Card>
-            <CardHeader className="bg-blue-50 border-b">
+          <Card className="shadow-lg border-blue-100 h-fit">
+            <CardHeader className="bg-blue-50 border-b border-blue-100">
               <CardTitle className="text-blue-800 flex items-center gap-2">
                 <Plus size={20}/> Nouvelle Pharmacie Partenaire
               </CardTitle>
@@ -45,6 +79,14 @@ export default function AdminDashboard() {
             <CardContent className="pt-6">
               <form onSubmit={handleSubmit} className="space-y-4">
                 
+                {/* Affichage du résultat (Succès/Erreur) */}
+                {result && (
+                  <div className={`p-4 rounded-lg border text-sm ${result.success ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                    <p className="font-bold">{result.success ? '✅ Succès !' : '❌ Erreur'}</p>
+                    <p>{result.message}</p>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label>Nom de la Pharmacie</Label>
                   <Input name="pharmacyName" placeholder="Ex: Pharmacie de la Gare" required />
@@ -68,38 +110,59 @@ export default function AdminDashboard() {
                 </div>
 
                 <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800" disabled={loading}>
-                  {loading ? 'Création en cours...' : 'Créer la pharmacie & Envoyer'}
+                  {loading ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Création...</>
+                  ) : 'Créer la pharmacie & Envoyer'}
                 </Button>
 
               </form>
             </CardContent>
           </Card>
 
-          {/* --- COLONNE DROITE : Résultat & Instructions --- */}
-          <div className="space-y-6">
-            {result && (
-              <div className={`p-6 rounded-xl border ${result.success ? 'bg-green-100 border-green-300 text-green-900' : 'bg-red-100 border-red-300 text-red-900'}`}>
-                <h3 className="font-bold mb-2">{result.success ? '✅ Succès !' : '❌ Erreur'}</h3>
-                <p>{result.message}</p>
-                {result.success && (
-                  <p className="text-sm mt-4 text-gray-600 italic">
-                    💡 Astuce : Copiez ces infos et envoyez-les par WhatsApp ou Mail au pharmacien.
-                  </p>
+          {/* --- COLONNE DROITE : Liste des Pharmacies --- */}
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <Store size={24} /> Liste des Pharmacies ({pharmaciesList.length})
+            </h2>
+
+            {loadingList ? (
+               <div className="text-center py-10 text-gray-400">
+                 <Loader2 className="mx-auto h-8 w-8 animate-spin mb-2"/> Chargement...
+               </div>
+            ) : (
+              <div className="grid gap-3 max-h-[600px] overflow-y-auto pr-2">
+                {pharmaciesList.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-6 text-center text-gray-500">
+                      Aucune pharmacie enregistrée pour l'instant.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  pharmaciesList.map((pharma) => (
+                    <Card key={pharma.id} className="hover:shadow-md transition-shadow">
+                      <CardContent className="p-4 flex justify-between items-center">
+                        <div>
+                          <h3 className="font-bold text-gray-900">{pharma.name}</h3>
+                          <div className="flex items-center gap-4 mt-1">
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <MapPin size={12}/> {pharma.quartier || 'Cotonou'}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${pharma.is_on_duty ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {pharma.is_on_duty ? 'DE GARDE' : 'FERMÉE'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          ID: #{pharma.id}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
                 )}
               </div>
             )}
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Liste des Pharmacies (Aperçu)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-500 text-sm">
-                  Aucune pharmacie pour l'instant.
-                </p>
-              </CardContent>
-            </Card>
           </div>
+
         </div>
       </div>
     </div>

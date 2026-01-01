@@ -5,17 +5,40 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Phone, MapPin, Clock, CheckCircle, Package } from 'lucide-react'
+import { Phone, MapPin, Clock, CheckCircle, XCircle, Package, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function SalesPage() {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [myPharmacyId, setMyPharmacyId] = useState(null) // Nouvel état pour stocker l'ID de ma pharmacie
 
-  // 1. Charger les commandes existantes
+  // --- 0. RÉCUPÉRER L'ID DE LA PHARMACIE CONNECTÉE ---
+  useEffect(() => {
+    const getPharmacyId = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('pharmacy_id')
+          .eq('id', user.id)
+          .single()
+        
+        if (profile?.pharmacy_id) {
+          setMyPharmacyId(profile.pharmacy_id)
+        }
+      }
+    }
+    getPharmacyId()
+  }, [])
+
+
+  // --- 1. FONCTION DE CHARGEMENT DES COMMANDES ---
   const fetchOrders = async () => {
+    if (!myPharmacyId) return // Attendre d'avoir l'ID de ma pharmacie
+    
+    setLoading(true)
     try {
-      // TODO: Remplacer '1' par l'ID dynamique de la pharmacie connectée
       const { data, error } = await supabase
         .from('sales')
         .select(`
@@ -26,28 +49,30 @@ export default function SalesPage() {
             products ( name )
           )
         `)
-        .eq('pharmacy_id', 1) 
+        .eq('pharmacy_id', myPharmacyId) // <--- C'est ici que ça change : ID dynamique !
         .order('created_at', { ascending: false })
 
       if (error) throw error
       setOrders(data)
     } catch (error) {
-      console.error(error)
+      console.error("Erreur chargement commandes:", error)
     } finally {
       setLoading(false)
     }
   }
 
-  // 2. Écouter les nouvelles commandes en TEMPS RÉEL
+  // 2. Écouter les nouvelles commandes en TEMPS RÉEL (s'active une fois qu'on a myPharmacyId)
   useEffect(() => {
-    fetchOrders()
+    if (!myPharmacyId) return // Ne pas s'abonner tant qu'on n'a pas l'ID
+
+    fetchOrders() // Charger une première fois avec le bon ID
 
     // On s'abonne aux changements sur la table 'sales'
     const channel = supabase
-      .channel('realtime:sales')
+      .channel(`realtime:sales:${myPharmacyId}`) // Nom du canal unique par pharmacie
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sales' }, (payload) => {
-        // Si une nouvelle commande arrive pour ma pharmacie (ID 1)
-        if (payload.new.pharmacy_id === 1) {
+        // Si une nouvelle commande arrive pour MA pharmacie
+        if (payload.new.pharmacy_id === myPharmacyId) { // Vérification avec ID dynamique
           toast.message("🔔 Nouvelle commande reçue !", {
             description: "Un client vient de valider un panier."
           })
@@ -59,11 +84,11 @@ export default function SalesPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [myPharmacyId]) // <--- Dépendance clé : se déclenche quand myPharmacyId est connu
 
-  // 3. Action : Changer le statut
+
+  // 3. Action : Changer le statut (reste inchangé)
   const updateStatus = async (orderId, newStatus) => {
-    // Optimistic UI update
     setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o))
 
     const { error } = await supabase
@@ -73,7 +98,7 @@ export default function SalesPage() {
 
     if (error) {
       toast.error("Erreur lors de la mise à jour")
-      fetchOrders() // Revert en cas d'erreur
+      fetchOrders()
     } else {
       toast.success(`Commande passée en : ${getStatusLabel(newStatus)}`)
     }
@@ -91,8 +116,11 @@ export default function SalesPage() {
         </Badge>
       </div>
 
-      {loading ? (
-        <p>Chargement des commandes...</p>
+      {loading || !myPharmacyId ? (
+        <div className="text-center py-20">
+          <Loader2 className="mx-auto h-10 w-10 animate-spin text-gray-400" />
+          <p className="mt-4 text-gray-500">Chargement des commandes...</p>
+        </div>
       ) : orders.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-xl border border-dashed">
           <Package className="mx-auto h-12 w-12 text-gray-300" />
@@ -110,7 +138,7 @@ export default function SalesPage() {
   )
 }
 
-// --- SOUS-COMPOSANT : La Carte de Commande ---
+// ... Le composant OrderCard et la fonction getStatusLabel restent inchangés ...
 function OrderCard({ order, onUpdateStatus }) {
   const statusColors = {
     pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -204,11 +232,10 @@ function OrderCard({ order, onUpdateStatus }) {
 function getStatusLabel(status) {
   switch (status) {
     case 'pending': return '⏳ En attente'
-    case 'accepted': return '👨‍⚕️ Préparation'
-    case 'delivering': return '🛵 En Livraison'
+    case 'accepted': return ' En phase de Préparation' // Correction de faute de frappe ici
+    case 'delivering': return ' En Livraison'
     case 'completed': return '✅ Livré'
     case 'cancelled': return '❌ Annulé'
     default: return status
   }
 }
-

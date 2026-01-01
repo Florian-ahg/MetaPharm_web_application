@@ -28,20 +28,31 @@ export default function AddProductModal({ onProductAdded }) {
 
     setLoading(true)
     try {
-      // 1. Vérifier si le produit existe déjà dans la base "Global" (Products)
-      // On cherche par nom exact (insensible à la casse)
+      // --- ETAPE 0 : Récupérer l'ID de la pharmacie du pharmacien connecté ---
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("Non connecté")
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('pharmacy_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile?.pharmacy_id) throw new Error("Aucune pharmacie liée à ce compte")
+      const myPharmacyId = profile.pharmacy_id
+      // ---------------------------------------------------------------------
+
+      // 1. Vérifier / Créer Produit
       let productId = null
-      
       const { data: existingProduct } = await supabase
         .from('products')
         .select('id')
-        .ilike('name', formData.name.trim()) // Recherche floue
+        .ilike('name', formData.name.trim())
         .maybeSingle()
 
       if (existingProduct) {
         productId = existingProduct.id
       } else {
-        // 2. Si n'existe pas, on le CRÉE dans la table 'products'
         const { data: newProduct, error: createError } = await supabase
           .from('products')
           .insert([{ name: formData.name.trim() }])
@@ -52,13 +63,11 @@ export default function AddProductModal({ onProductAdded }) {
         productId = newProduct.id
       }
 
-      // 3. Ajouter ce produit au STOCK de la pharmacie
-      // Note: Pour le MVP, on force l'ID pharmacie à 1 (ou utilisez l'ID dynamique si vous l'avez)
-      // Vous devrez peut-être récupérer l'ID utilisateur connecté ici
+      // 2. Insérer dans le stock avec le VRAI ID Pharmacie
       const { error: stockError } = await supabase
         .from('stocks')
         .insert([{
-          pharmacy_id: 1, // ⚠️ À remplacer par l'ID dynamique de la pharmacie connectée
+          pharmacy_id: myPharmacyId, // <--- On utilise l'ID dynamique ici !
           product_id: productId,
           price: parseInt(formData.price),
           available: true
@@ -67,15 +76,13 @@ export default function AddProductModal({ onProductAdded }) {
       if (stockError) throw stockError
 
       toast.success("Produit ajouté au stock !")
-      setOpen(false) // Fermer la fenêtre
-      setFormData({ name: '', price: '' }) // Reset formulaire
-      
-      // Rafraîchir la liste parente
+      setOpen(false)
+      setFormData({ name: '', price: '' })
       if (onProductAdded) onProductAdded()
 
     } catch (error) {
       console.error(error)
-      toast.error("Erreur lors de l'ajout. Vérifiez s'il n'est pas déjà dans votre stock.")
+      toast.error(`Erreur : ${error.message}`)
     } finally {
       setLoading(false)
     }

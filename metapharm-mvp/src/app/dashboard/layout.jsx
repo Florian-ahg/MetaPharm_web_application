@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { supabase } from '@/lib/supabase'
+import PharmacyStatusSwitch from '@/components/dashboard/PharmacyStatusSwitch'
 
 const navigation = [
   { name: 'Vue d\'ensemble', href: '/dashboard', icon: LayoutDashboard },
@@ -141,6 +142,9 @@ export default function DashboardLayout({ children }) {
                 </SheetContent>
               </Sheet>
               <h2 className="text-xl font-semibold text-gray-800">Dashboard</h2>
+              
+              {/* ✨ Switch Statut Pharmacie ✨ */}
+              <PharmacyStatusSwitch />
             </div>
             
             {/* User Menu */}
